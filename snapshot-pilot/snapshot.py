@@ -95,27 +95,83 @@ def heading_level(link) -> str:
 NOISE_TAGS = ["header", "nav", "footer", "svg", "script", "style", "noscript", "form"]
 
 
+HEADINGS = ["h1", "h2", "h3", "h4", "h5", "h6"]
+
+# Daten-Attribute, in denen manche Verlage den Teaser-Typ direkt hinschreiben,
+# z. B. Spiegel data-target-teaser="xl-news", SZ data-manual="teaser-xl".
+TEASER_TYPE_ATTRS = ["data-target-teaser", "data-manual", "data-teaser-type"]
+
+
+def _is_teaser_block(tag) -> bool:
+    """Ist das ein Teaser-Block (und nicht nur dessen Überschrift oder Link)?"""
+    if tag.name in HEADINGS or tag.name == "a":
+        return False
+    if tag.name == "article":
+        return True
+    classes = [c.lower() for c in (tag.get("class") or [])]
+    if any(w in c for c in classes for w in ("headline", "title", "link", "label")):
+        return False  # z. B. Welt "c-teaser__headline" ist nur die Überschrift
+    # "__" kennzeichnet nach BEM-Schreibweise nur ein Teil-Element (z. B. "c-teaser__body"),
+    # gesucht ist der ganze Block ("c-teaser"). "--" ist eine Variante und zählt mit ("teaser--top").
+    return any("teaser" in c and "__" not in c for c in classes)
+
+
 def teaser_container(link):
     """Der Block, der einen Teaser umschließt.
 
-    Viele Verlage benennen ihn mit "teaser" in der CSS-Klasse, z. B. bei tagesschau.de
-    "teaser teaser--top" (Aufmacher) oder "teaser-nano" (kleine Textzeile).
-    Gibt es so einen Block nicht, nehmen wir das nächste article/li/section/div.
+    Gesucht wird der nächste umgebende Block, der ein <article> ist oder "teaser"
+    in der CSS-Klasse trägt, z. B. bei tagesschau.de "teaser teaser--top" (Aufmacher)
+    oder "teaser-nano" (kleine Textzeile). Gibt es keinen, nehmen wir das nächste li/section/div.
     """
     for parent in link.parents:
         if parent.name in ("body", "main", "[document]"):
             break
-        if any("teaser" in c.lower() for c in (parent.get("class") or [])):
+        if _is_teaser_block(parent):
             return parent
-    return link.find_parent(["article", "li", "section", "div"])
+    return link.find_parent(["li", "section", "div"])
 
 
 def describe(tag) -> str:
-    """Kurzbeschreibung eines Containers, z. B. 'div.teaser.teaser--top'."""
+    """Kurzbeschreibung eines Containers, z. B. 'div.teaser.teaser--top' oder 'article[xl-news]'."""
     if tag is None:
         return ""
     classes = tag.get("class") or []
-    return ".".join([tag.name] + classes[:3])
+    text = ".".join([tag.name] + classes[:3])
+    for attr in TEASER_TYPE_ATTRS:
+        if tag.get(attr):
+            text += f"[{tag[attr]}]"
+    return text
+
+
+def teaser_title(link, container) -> str:
+    """Überschrift eines Teasers. Manche Seiten haben leere Links, die über dem Teaser liegen.
+
+    Reihenfolge: sichtbarer Linktext, Überschrift im Teaser-Block, title-Attribut des Links.
+    """
+    def clean(text):
+        return " ".join((text or "").split())
+
+    heading = link.find(HEADINGS) or link.find_parent(HEADINGS)
+    if heading:
+        return clean(heading.get_text(" ", strip=True))
+    text = clean(link.get_text(" ", strip=True))
+    if len(text) >= MIN_TEASER_CHARS:
+        return text
+    if container is not None:
+        heading = container.find(HEADINGS)
+        if heading:
+            return clean(heading.get_text(" ", strip=True))
+    return clean(link.get("title")) or text
+
+
+def heading_level_in(link, container) -> str:
+    """Überschriftsebene: erst am Link selbst, sonst die erste Überschrift im Teaser-Block."""
+    lvl = heading_level(link)
+    if not lvl and container is not None:
+        heading = container.find(HEADINGS)
+        if heading:
+            lvl = heading.name[1]
+    return lvl
 
 
 def extract_teasers(html: bytes, page_url: str, source: str, snapshot_utc: str,
@@ -127,6 +183,11 @@ def extract_teasers(html: bytes, page_url: str, source: str, snapshot_utc: str,
     """
     soup = BeautifulSoup(html, "html.parser")
     for tag in soup.find_all(NOISE_TAGS):
+        if tag.decomposed:
+            continue  # steckte in einem schon entfernten Element
+        # <header>/<footer> innerhalb eines Artikels gehören zum Teaser (bei Welt steckt dort das Bild).
+        if tag.name in ("header", "footer") and tag.find_parent(["article", "main"]):
+            continue
         tag.decompose()  # Element samt Inhalt aus dem HTML entfernen
     root = soup.select_one(scope) if scope else None
     root = root or soup.body or soup
@@ -138,14 +199,13 @@ def extract_teasers(html: bytes, page_url: str, source: str, snapshot_utc: str,
         url = urljoin(page_url, link["href"]).split("#")[0]
         if urlparse(url).netloc != home_host:
             continue  # externe Links (Werbung, Social Media) ignorieren
-        title = " ".join(link.get_text(" ", strip=True).split())
+        container = teaser_container(link)
+        title = teaser_title(link, container)
         if len(title) < MIN_TEASER_CHARS:
             continue
-
-        container = teaser_container(link)
         has_image = bool(link.find(["img", "picture"]) or
                          (container and container.find(["img", "picture"])))
-        lvl = heading_level(link)
+        lvl = heading_level_in(link, container)
 
         if url in rows:
             # Gleicher Artikel ein zweites Mal (z. B. im Aufmacher und in einer Liste):

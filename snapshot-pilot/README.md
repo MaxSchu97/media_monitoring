@@ -1,6 +1,6 @@
 # Startseiten-Snapshot (Pilot)
 
-Speichert stündlich die Startseite einer Zeitung (tagesschau, Spiegel, Zeit, FAZ, SZ, Welt; siehe `sources.json`) und liest die Teaser
+Speichert stündlich die Startseite einer Zeitung (tagesschau, Spiegel, FAZ, SZ, Welt; siehe `sources.json`) und liest die Teaser
 mit ihren Sichtbarkeits-Signalen aus (Position, Überschriftsebene, Bild, Container).
 
 ## Einrichten auf GitHub (einmalig, ca. 5 Minuten)
@@ -59,3 +59,16 @@ python3 snapshot.py               # einen Snapshot machen
   Zeitung eigene, dokumentierte Regeln (siehe Projektbeschreibung, Abschnitt 6).
 - Rohdaten wachsen um ca. 30–50 MB pro Zeitung und Monat. Bei mehr als 5 Zeitungen
   die Roh-HTMLs besser auslagern (z. B. Cloudflare R2).
+
+## Teaser-Erkennung verbessern
+
+Nach jeder Änderung an `extract_teasers()` in `snapshot.py` alle alten Snapshots neu auswerten:
+```bash
+python3 reparse.py   # löscht data/teasers/ und erzeugt alle CSVs aus data/raw/ neu
+```
+
+## Quellen, die nicht funktionieren
+
+| Zeitung | Problem (Stand 06.11.2026) |
+|---|---|
+| zeit.de | Server antwortet mit HTTP 403 (blockiert automatische Abrufe). Nicht umgehen. |

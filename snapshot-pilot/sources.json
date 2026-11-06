@@ -1,8 +1,7 @@
 [
-  { "name": "tagesschau",   "url": "https://www.tagesschau.de/" },
-  { "name": "spiegel",      "url": "https://www.spiegel.de/" },
-  { "name": "zeit",         "url": "https://www.zeit.de/index" },
-  { "name": "faz",          "url": "https://www.faz.net/aktuell/" },
-  { "name": "sueddeutsche", "url": "https://www.sueddeutsche.de/" },
-  { "name": "welt",         "url": "https://www.welt.de/" }
+  {"name": "tagesschau", "url": "https://www.tagesschau.de/"},
+  {"name": "spiegel", "url": "https://www.spiegel.de/"},
+  {"name": "faz", "url": "https://www.faz.net/aktuell/"},
+  {"name": "sueddeutsche", "url": "https://www.sueddeutsche.de/"},
+  {"name": "welt", "url": "https://www.welt.de/"}
 ]
