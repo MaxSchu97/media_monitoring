@@ -1,6 +1,6 @@
 # Startseiten-Snapshot (Pilot)
 
-Speichert stündlich die Startseite einer Zeitung (Pilot: tagesschau.de) und liest die Teaser
+Speichert stündlich die Startseite einer Zeitung (tagesschau, Spiegel, Zeit, FAZ, SZ, Welt; siehe `sources.json`) und liest die Teaser
 mit ihren Sichtbarkeits-Signalen aus (Position, Überschriftsebene, Bild, Container).
 
 ## Einrichten auf GitHub (einmalig, ca. 5 Minuten)

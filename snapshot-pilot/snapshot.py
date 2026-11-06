@@ -90,27 +90,51 @@ def heading_level(link) -> str:
     return ""
 
 
+# Bereiche, die fast nie redaktionelle Teaser enthalten: Kopfzeile, Menüs, Fußzeile.
+# <svg> fliegt raus, weil Icons oft versteckten Text enthalten (z. B. "Article / Meldung").
+NOISE_TAGS = ["header", "nav", "footer", "svg", "script", "style", "noscript", "form"]
+
+
 def teaser_container(link):
-    """Nächster umgebender Block, der typischerweise einen Teaser umschließt."""
+    """Der Block, der einen Teaser umschließt.
+
+    Viele Verlage benennen ihn mit "teaser" in der CSS-Klasse, z. B. bei tagesschau.de
+    "teaser teaser--top" (Aufmacher) oder "teaser-nano" (kleine Textzeile).
+    Gibt es so einen Block nicht, nehmen wir das nächste article/li/section/div.
+    """
+    for parent in link.parents:
+        if parent.name in ("body", "main", "[document]"):
+            break
+        if any("teaser" in c.lower() for c in (parent.get("class") or [])):
+            return parent
     return link.find_parent(["article", "li", "section", "div"])
 
 
 def describe(tag) -> str:
-    """Kurzbeschreibung eines Containers, z. B. 'article.teaser.teaser--hero'."""
+    """Kurzbeschreibung eines Containers, z. B. 'div.teaser.teaser--top'."""
     if tag is None:
         return ""
     classes = tag.get("class") or []
     return ".".join([tag.name] + classes[:3])
 
 
-def extract_teasers(html: bytes, page_url: str, source: str, snapshot_utc: str) -> list[dict]:
-    """Findet alle Artikel-Links der Startseite und sammelt pro Link die Sichtbarkeits-Signale."""
+def extract_teasers(html: bytes, page_url: str, source: str, snapshot_utc: str,
+                    scope: str = "main") -> list[dict]:
+    """Findet alle Artikel-Links der Startseite und sammelt pro Link die Sichtbarkeits-Signale.
+
+    scope: CSS-Selektor für den redaktionellen Hauptbereich (Standard: <main>).
+           Fehlt er auf der Seite, wird die ganze Seite ohne Kopf-/Fußzeile genommen.
+    """
     soup = BeautifulSoup(html, "html.parser")
+    for tag in soup.find_all(NOISE_TAGS):
+        tag.decompose()  # Element samt Inhalt aus dem HTML entfernen
+    root = soup.select_one(scope) if scope else None
+    root = root or soup.body or soup
     home_host = urlparse(page_url).netloc
 
     rows: dict[str, dict] = {}  # URL -> Zeile, damit jeder Artikel nur einmal zählt
     position = 0
-    for link in soup.find_all("a", href=True):
+    for link in root.find_all("a", href=True):
         url = urljoin(page_url, link["href"]).split("#")[0]
         if urlparse(url).netloc != home_host:
             continue  # externe Links (Werbung, Social Media) ignorieren
@@ -118,25 +142,28 @@ def extract_teasers(html: bytes, page_url: str, source: str, snapshot_utc: str) 
         if len(title) < MIN_TEASER_CHARS:
             continue
 
+        container = teaser_container(link)
+        has_image = bool(link.find(["img", "picture"]) or
+                         (container and container.find(["img", "picture"])))
+        lvl = heading_level(link)
+
         if url in rows:
-            # Gleicher Artikel ein zweites Mal (z. B. Bild-Link + Text-Link):
+            # Gleicher Artikel ein zweites Mal (z. B. im Aufmacher und in einer Liste):
             # Position bleibt die erste, aber wir merken uns die Mehrfachnennung
-            # und übernehmen das stärkere Signal (höhere Überschrift, Bild).
+            # und übernehmen das jeweils stärkere Signal (höhere Überschrift, Bild).
             row = rows[url]
             row["occurrences"] += 1
-            lvl = heading_level(link)
             if lvl and (not row["heading_level"] or lvl < row["heading_level"]):
                 row["heading_level"] = lvl
+            row["has_image"] = max(row["has_image"], int(has_image))
             continue
 
         position += 1
-        container = teaser_container(link)
-        has_image = bool(link.find("img") or (container and container.find(["img", "picture"])))
         rows[url] = {
             "snapshot_utc": snapshot_utc,
             "source": source,
             "position": position,
-            "heading_level": heading_level(link),
+            "heading_level": lvl,
             "has_image": int(has_image),
             "container": describe(container),
             "occurrences": 1,
@@ -163,6 +190,13 @@ def snapshot_source(source: dict, now: datetime) -> bool:
     stamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     print(f"[{name}] {url}")
 
+    # Schon ein Snapshot in dieser Stunde? Dann nicht doppelt abrufen.
+    # So können der externe Stunden-Wecker und GitHubs eigener Zeitplan parallel laufen.
+    day_dir = DATA_DIR / "raw" / name / now.strftime("%Y-%m-%d")
+    if list(day_dir.glob(f"{now:%H}*.html.gz")):
+        print(f"  Für {now:%H} Uhr UTC gibt es schon einen Snapshot, überspringe.")
+        return True
+
     if not allowed_by_robots(url):
         print("  laut robots.txt nicht erlaubt oder nicht prüfbar, kein Abruf.")
         return False
@@ -183,7 +217,7 @@ def snapshot_source(source: dict, now: datetime) -> bool:
     with gzip.open(raw_path, "wb") as f:
         f.write(html)
 
-    rows = extract_teasers(html, url, name, stamp)
+    rows = extract_teasers(html, url, name, stamp, source.get("scope", "main"))
     append_csv(DATA_DIR / "teasers" / name / f"{now:%Y-%m}.csv", rows)
     print(f"  {len(html) // 1024} KB HTML, {len(rows)} Teaser gespeichert.")
     return True
