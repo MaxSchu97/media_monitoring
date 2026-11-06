@@ -1,0 +1,61 @@
+# Stündlicher Startseiten-Snapshot.
+# GitHub startet diesen Job automatisch und speichert die Ergebnisse als Commit im Repo.
+name: Startseiten-Snapshot
+
+on:
+  schedule:
+    # Cron-Syntax: Minute Stunde Tag Monat Wochentag (immer in UTC).
+    # "17 * * * *" = jede Stunde um xx:17. Nicht xx:00, weil zur vollen Stunde
+    # sehr viele Jobs auf GitHub starten und sich dann stärker verspäten.
+    - cron: "17 * * * *"
+  # Erlaubt den manuellen Start über den Button "Run workflow" im Actions-Tab.
+  workflow_dispatch:
+
+# Der Job darf Commits ins eigene Repo pushen.
+permissions:
+  contents: write
+
+# Falls ein Lauf hängt, startet der nächste nicht parallel dazu.
+concurrency:
+  group: snapshot
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    # Das Skript liegt im Unterordner snapshot-pilot/. Alle "run"-Befehle starten dort.
+    defaults:
+      run:
+        working-directory: snapshot-pilot
+    timeout-minutes: 10   # Notbremse, damit ein hängender Lauf keine Freiminuten frisst
+    steps:
+      # 1. Repo-Inhalt auf die GitHub-Maschine holen
+      - uses: actions/checkout@v4
+
+      # 2. Python installieren (pip-Pakete werden zwischen Läufen gecacht)
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: snapshot-pilot/requirements.txt
+
+      # 3. Abhängigkeiten installieren
+      - run: pip install -r requirements.txt
+
+      # 4. Snapshot machen
+      - run: python snapshot.py
+
+      # 5. Neue Daten committen und pushen (nur wenn sich etwas geändert hat)
+      - name: Daten committen
+        run: |
+          git config user.name  "snapshot-bot"
+          git config user.email "snapshot-bot@users.noreply.github.com"
+          git add data/
+          if git diff --cached --quiet; then
+            echo "Keine neuen Daten."
+            exit 0
+          fi
+          git commit -m "Snapshot $(date -u +'%Y-%m-%d %H:%M') UTC"
+          # Falls zwischendurch jemand anders gepusht hat: erst holen, dann pushen
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
