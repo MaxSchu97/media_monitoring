@@ -4,10 +4,12 @@ name: Startseiten-Snapshot
 
 on:
   schedule:
+    # Reserve-Zeitplan. Der eigentliche Wecker ist cron-job.org (pünktlicher).
     # Cron-Syntax: Minute Stunde Tag Monat Wochentag (immer in UTC).
-    # "17 * * * *" = jede Stunde um xx:17. Nicht xx:00, weil zur vollen Stunde
-    # sehr viele Jobs auf GitHub starten und sich dann stärker verspäten.
-    - cron: "17 * * * *"
+    # "17 2,5-22 * * *" = um xx:17 UTC um 2 Uhr und von 5 bis 22 Uhr.
+    # Im Winter (MEZ = UTC+1) entspricht das 3 Uhr und 6-23 Uhr deutscher Zeit,
+    # im Sommer verschiebt es sich um eine Stunde nach hinten.
+    - cron: "17 2,5-22 * * *"
   # Erlaubt den manuellen Start über den Button "Run workflow" im Actions-Tab.
   workflow_dispatch:
 
